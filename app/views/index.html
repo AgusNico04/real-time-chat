@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat</title>
+</head>
+<body>
+    <style>
+        body { margin: 0; padding-bottom: 3rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  
+        #chat { background: rgba(0, 0, 0, 0.15); padding: 0.25rem; position: fixed; bottom: 0; left: 0; right: 0; display: flex; height: 3rem; box-sizing: border-box; backdrop-filter: blur(10px); }
+        #chat-input { display: block; border: none; padding: 0 1rem; flex-grow: 1; border-radius: 2rem; margin: 0.25rem; }
+        #chat-input:focus { outline: none; }
+        #chat > button { background: #333; border: none; padding: 0 1rem; margin: 0.25rem; border-radius: 3px; outline: none; color: #fff; }
+  
+        #messages-container { list-style-type: none; margin: 0; padding: 0; }
+        #messages-container > li { padding: 0.5rem 1rem; }
+        #messages-container > li:nth-child(odd) { background: #efefef; }
+
+        #actions { background: rgb(67, 231, 94); position: sticky; display: flex; flex-direction: row; height: 4rem; box-sizing: border-box; margin: 0; }
+        #actions-typing { margin: 10px; }
+
+        #contacts { width: 20vw; }
+        #contacts > p { text-align: center; }
+
+        #contact-list { list-style: none; margin: 0; padding: 0; }
+        #contact-list > li { display: block; margin: 5px 0; }
+        #contact-list > li > button { width: 100%; padding: 10px; background: rgb(67, 185, 231); border: none; outline: none; color: #fff; }
+        #contact-list > li > button:hover { background:rgb(51, 141, 177); }
+        #contact-list > li > button:focus { background: rgb(67, 231, 94); }
+
+        #new-contact-input { width: 80%; border-radius: 3px; background: rgb(67, 231, 94); border: none; padding: 5px; color: #000; }
+        #new-contact-input:focus { outline: none; }
+    </style>
+
+    <div id="actions">
+        <p id="actions-typing"></p>
+    </div>
+    
+    <div id="contacts">
+        <p>Contacts</p>
+        <ul id="contact-list">
+
+        </ul>
+
+        <input type="text" placeholder="Add a contact by their username" id="new-contact-input"><button id="new-contact-button">Add</button>
+    </div>
+
+    <ul id="messages-container"></ul>
+    <div id="chat">
+        <input id="chat-input" autocomplete="off"><button id="send-btn">Send</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        
+        let input = document.getElementById('chat-input');
+        let btn = document.getElementById('send-btn');
+        let messagesContainer = document.getElementById('messages-container');
+
+        let newContactInput = document.getElementById('new-contact-input');
+        let newContactBtn = document.getElementById('new-contact-button');
+        let contactList = document.getElementById('contact-list');
+
+        let selectedUser = '';
+        let selfID;
+        let currentChat = '';
+        const messages = new Map();
+
+        const user = prompt('Choose an username');
+        socket.emit('username-selected', { username: user });
+        socket.emit('get-self-id', { user: user });
+
+        function displayMessage(data) {
+            let li = document.createElement('li');
+            li.innerHTML = data;
+            messagesContainer.appendChild(li);
+        }
+
+        function getChat(fromID, to) {
+            if (fromID.charCodeAt(0) > to.charCodeAt(0)) {
+                return `${fromID}-${to}`;
+            }
+            else if (fromID.charCodeAt(0) < to.charCodeAt(0)) {
+                return `${to}-${fromID}`;
+            }
+            
+            for (let i = 1; i < Math.min(fromID.length, to.length); i++) {
+                if (fromID.charCodeAt(i) > to.charCodeAt(i)) {
+                    return `${fromID}-${to}`
+                }
+                else if (fromID.charCodeAt(i) < to.charCodeAt(i)) {
+                    return `${to}-${fromID}`;
+                }
+            }
+        }
+
+        newContactBtn.addEventListener('click', e => {
+            e.preventDefault();
+            if (newContactInput.value) {
+                let li = document.createElement('li');
+                li.innerHTML = `<button>${newContactInput.value}</button>`;
+                contactList.appendChild(li);
+                li.addEventListener('click', () => {
+                    const newUser = li.innerHTML.replace('<button>', "").replace('</button>', '');
+                    socket.emit('select-user', { selectedUser: newUser });
+                });
+            }
+        });
+
+        btn.addEventListener('click', e => {
+            e.preventDefault();
+            if (input.value) {
+                socket.emit('chat-message', { msg: input.value, from: user });
+                socket.emit('typing-stop');
+                input.value = '';
+                window.scrollTo(0, document.body.scrollHeight);
+            }
+        });
+
+        input.addEventListener('keypress', e => {
+            if (e.keyCode == 13 && input.value) {
+                socket.emit('chat-message', { msg: input.value, from: user });
+                socket.emit('typing-stop');
+                input.value = '';
+                window.scrollTo(0, document.body.scrollHeight);
+            }
+        });
+
+        input.addEventListener('focus', () => {
+            socket.emit('typing-start', { user: user });
+        });
+
+        input.addEventListener('focusout', () => {
+            socket.emit('typing-stop');
+        });
+
+        socket.on('get-self-id', data => selfID = data.ID);
+
+        socket.on('chat-message', data => {
+            currentChat = getChat(data.fromID, data.to);
+
+            if (!messages.has(currentChat)) {
+                messages.set(currentChat, [{ from: data.from, msg: data.msg }]);
+                console.log('messages set: ', messages);
+            }
+            else {
+                // This intrincated method has the same effect as 'messages.set(key, messages.get(currentChat).push(...args))'
+                // but for some reason this method instead of returning a new array with the new messages returned the length of the array itself
+                // and after a while of trying to figure the problem out I gave up and I came up with this longer and more complicated method instead
+                let arr = []
+                arr.push(messages.get(currentChat));
+                arr.push({ from: data.from, msg: data.msg });
+                messages.set(currentChat, arr.flat(Infinity));
+            }
+
+            if (data.fromID == selectedUser || data.fromID == selfID) displayMessage(`${data.from}: ${data.msg}`);
+        });
+
+        socket.on('load-messages', data => {
+            currentChat = getChat(data.fromID, data.to);
+            selectedUser = data.to;
+            messagesContainer.innerHTML = '';
+            if (messages.has(currentChat)) {
+                for (let msg of messages.get(currentChat)) {
+                    let li = document.createElement('li');
+                    li.innerHTML = `${msg.from}: ${msg.msg}`;
+                    messagesContainer.appendChild(li);
+                }
+            }
+        });
+
+        socket.on('error', errorID => {
+            switch (errorID) {
+                case 001:
+                    alert('Error: User does not exist');
+                    break;
+            
+                default:
+                    alert('Unknown error');
+                    break;
+            }
+        });
+
+        socket.on('typing-start', data => document.getElementById('actions-typing').textContent = `${data.user} is typing...`);
+
+        socket.on('typing-stop', () => document.getElementById('actions-typing').textContent = '');
+    </script>
+</body>
+</html>
