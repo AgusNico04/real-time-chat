@@ -19,9 +19,6 @@
         #messages-container > li { padding: 0.5rem 1rem; }
         #messages-container > li:nth-child(odd) { background: #efefef; }
 
-        #actions { background: rgb(67, 231, 94); position: sticky; display: flex; flex-direction: row; height: 4rem; box-sizing: border-box; margin: 0; }
-        #actions-typing { margin: 10px; }
-
         #contacts { width: 20vw; }
         #contacts > p { text-align: center; }
 
@@ -34,23 +31,19 @@
         #new-contact-input { width: 80%; border-radius: 3px; background: rgb(67, 231, 94); border: none; padding: 5px; color: #000; }
         #new-contact-input:focus { outline: none; }
     </style>
-
-    <div id="actions">
-        <p id="actions-typing"></p>
-    </div>
     
     <div id="contacts">
-        <p>Contacts</p>
+        <p>Contactos</p>
         <ul id="contact-list">
 
         </ul>
 
-        <input type="text" placeholder="Add a contact by their username" id="new-contact-input"><button id="new-contact-button">Add</button>
+        <input type="text" placeholder="Añade un usuario" id="new-contact-input"><button id="new-contact-button">Añadir</button>
     </div>
 
     <ul id="messages-container"></ul>
     <div id="chat">
-        <input id="chat-input" autocomplete="off"><button id="send-btn">Send</button>
+        <input id="chat-input" autocomplete="off"><button id="send-btn">Enviar</button>
     </div>
 
     <script src="/socket.io/socket.io.js"></script>
@@ -70,7 +63,7 @@
         let currentChat = '';
         const messages = new Map();
 
-        const user = prompt('Choose an username');
+        const user = prompt('Elige un nombre de usuario');
         socket.emit('username-selected', { username: user });
         socket.emit('get-self-id', { user: user });
 
@@ -80,15 +73,18 @@
             messagesContainer.appendChild(li);
         }
 
-        function getChat(fromID, to) {
-            if (fromID.charCodeAt(0) > to.charCodeAt(0)) {
+        function getChatID(fromID, to) {
+            if (fromID.length !== to.length) {
+                return fromID.length > to.length ? `${fromID}-${to}` : `${to}-${fromID}`;
+            }
+            else if (fromID.charCodeAt(0) > to.charCodeAt(0)) {
                 return `${fromID}-${to}`;
             }
             else if (fromID.charCodeAt(0) < to.charCodeAt(0)) {
                 return `${to}-${fromID}`;
             }
             
-            for (let i = 1; i < Math.min(fromID.length, to.length); i++) {
+            for (let i = 1; i < fromID.length; i++) {
                 if (fromID.charCodeAt(i) > to.charCodeAt(i)) {
                     return `${fromID}-${to}`
                 }
@@ -101,13 +97,21 @@
         newContactBtn.addEventListener('click', e => {
             e.preventDefault();
             if (newContactInput.value) {
-                let li = document.createElement('li');
-                li.innerHTML = `<button>${newContactInput.value}</button>`;
+                const li = document.createElement('li');
+                const newButton = document.createElement('button');
+
+                newButton.innerHTML = newContactInput.value;
+                newButton.setAttribute('data-user', newContactInput.value);
+
+                li.appendChild(newButton);
                 contactList.appendChild(li);
-                li.addEventListener('click', () => {
-                    const newUser = li.innerHTML.replace('<button>', "").replace('</button>', '');
-                    socket.emit('select-user', { selectedUser: newUser });
-                });
+
+                const button = li.getElementsByTagName('button')[0];
+                const contactName = button.getAttribute('data-user');
+
+                li.addEventListener('click', () => socket.emit('select-user', { selectedUser: contactName }));
+                li.addEventListener('typing', () => button.innerHTML += ' está escribiendo...');
+                li.addEventListener('typing-stop', () => button.innerHTML = contactName);
             }
         });
 
@@ -115,16 +119,16 @@
             e.preventDefault();
             if (input.value) {
                 socket.emit('chat-message', { msg: input.value, from: user });
-                socket.emit('typing-stop');
+                socket.emit('typing-stop', { user: user });
                 input.value = '';
                 window.scrollTo(0, document.body.scrollHeight);
             }
         });
 
         input.addEventListener('keypress', e => {
-            if (e.keyCode == 13 && input.value) {
+            if (e.keyCode === 13 && input.value) {
                 socket.emit('chat-message', { msg: input.value, from: user });
-                socket.emit('typing-stop');
+                socket.emit('typing-stop', { user: user });
                 input.value = '';
                 window.scrollTo(0, document.body.scrollHeight);
             }
@@ -135,40 +139,31 @@
         });
 
         input.addEventListener('focusout', () => {
-            socket.emit('typing-stop');
+            socket.emit('typing-stop', { user: user });
         });
 
         socket.on('get-self-id', data => selfID = data.ID);
 
         socket.on('chat-message', data => {
-            currentChat = getChat(data.fromID, data.to);
+            currentChat = getChatID(data.fromID, data.to);
 
             if (!messages.has(currentChat)) {
                 messages.set(currentChat, [{ from: data.from, msg: data.msg }]);
-                console.log('messages set: ', messages);
             }
             else {
-                // This intrincated method has the same effect as 'messages.set(key, messages.get(currentChat).push(...args))'
-                // but for some reason this method instead of returning a new array with the new messages returned the length of the array itself
-                // and after a while of trying to figure the problem out I gave up and I came up with this longer and more complicated method instead
-                let arr = []
-                arr.push(messages.get(currentChat));
-                arr.push({ from: data.from, msg: data.msg });
-                messages.set(currentChat, arr.flat(Infinity));
+                messages.set(currentChat, messages.get(currentChat).concat([{ from: data.from, msg: data.msg }]));
             }
 
-            if (data.fromID == selectedUser || data.fromID == selfID) displayMessage(`${data.from}: ${data.msg}`);
+            if (data.fromID === selfID || (data.fromID === selectedUser && data.to === selfID)) displayMessage(`${data.from}: ${data.msg}`);
         });
 
         socket.on('load-messages', data => {
-            currentChat = getChat(data.fromID, data.to);
+            currentChat = getChatID(data.fromID, data.to);
             selectedUser = data.to;
             messagesContainer.innerHTML = '';
             if (messages.has(currentChat)) {
                 for (let msg of messages.get(currentChat)) {
-                    let li = document.createElement('li');
-                    li.innerHTML = `${msg.from}: ${msg.msg}`;
-                    messagesContainer.appendChild(li);
+                    displayMessage(`${msg.from}: ${msg.msg}`);
                 }
             }
         });
@@ -184,10 +179,30 @@
                     break;
             }
         });
+        
+        socket.on('typing-start', data => {
+            if (data.to === selfID) {
+                const typingEvent = new Event('typing');
+                const contacts = contactList.getElementsByTagName('li');
+                for (let li of contacts) {
+                    const button = li.getElementsByTagName('button')[0];
+                    const contactName = button.getAttribute('data-user');
+                    if (contactName === data.user) li.dispatchEvent(typingEvent);
+                }
+            }
+        });
 
-        socket.on('typing-start', data => document.getElementById('actions-typing').textContent = `${data.user} is typing...`);
-
-        socket.on('typing-stop', () => document.getElementById('actions-typing').textContent = '');
+        socket.on('typing-stop', data => {
+            if (data.to === selfID) {
+                const typingEvent = new Event('typing-stop');
+                const contacts = contactList.getElementsByTagName('li');
+                for (let li of contacts) {
+                    const button = li.getElementsByTagName('button')[0];
+                    const contactName = button.getAttribute('data-user');
+                    if (contactName === data.user) li.dispatchEvent(typingEvent);
+                }
+            }
+        });
     </script>
 </body>
 </html>

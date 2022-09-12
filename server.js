@@ -27,10 +27,9 @@ io.on('connection', socket => {
     socket.on('select-user', data => {
         if (connectedUsers.get(data.selectedUser)) {
             if (socket.rooms) socket.leave(socket.selectedUser);
-            console.log(data.selectedUser, connectedUsers.get(data.selectedUser));
             socket.join(connectedUsers.get(data.selectedUser));
             socket.selectedUser = connectedUsers.get(data.selectedUser);
-            socket.emit('load-messages', { fromID: socket.id, to: socket.selectedUser })
+            socket.emit('load-messages', { fromID: socket.id, to: socket.selectedUser });
             return;
         }
         socket.emit('error', 001);
@@ -38,13 +37,12 @@ io.on('connection', socket => {
 
     socket.on('chat-message', data => {
         if (socket.selectedUser) {
-            io.to(socket.selectedUser).emit('chat-message', {msg: data.msg, from: data.from, fromID: socket.id, to: socket.selectedUser});
+            io.emit('chat-message', { msg: data.msg, from: data.from, fromID: socket.id, to: socket.selectedUser });
         }
     });
 
-    socket.on('typing-start', data => socket.broadcast.to(socket.selectedUser).emit('typing-start', {user: data.user}));
-
-    socket.on('typing-stop', () => socket.broadcast.to(socket.selectedUser).emit('typing-stop'));
+    socket.on('typing-start', data => io.emit('typing-start', { user: data.user, to: socket.selectedUser }));
+    socket.on('typing-stop', data => io.emit('typing-stop', { user: data.user, to: socket.selectedUser }));
 });
 
 server.listen(3000, (req, res) => {
