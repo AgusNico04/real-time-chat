@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
@@ -8,28 +8,34 @@
 </head>
 <body>
     <style>
-        body { margin: 0; padding-bottom: 3rem; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-  
-        #chat { background: rgba(0, 0, 0, 0.15); padding: 0.25rem; position: fixed; bottom: 0; left: 0; right: 0; display: flex; height: 3rem; box-sizing: border-box; backdrop-filter: blur(10px); }
-        #chat-input { display: block; border: none; padding: 0 1rem; flex-grow: 1; border-radius: 2rem; margin: 0.25rem; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow-x: hidden; }
+
+        #chat-input { display: block; position: fixed; bottom: 6px; left: 21vw; right: 0; border: none; padding: 12px 1rem; border-radius: 2rem; background:rgb(31, 31, 31); width: 72.5vw;}
         #chat-input:focus { outline: none; }
-        #chat > button { background: #333; border: none; padding: 0 1rem; margin: 0.25rem; border-radius: 3px; outline: none; color: #fff; }
+        #send-btn { position: fixed; width: 60px; right: 10px; bottom: 6px; background: rgb(34, 30, 70); border: none; padding: 12px; border-radius: 7px; outline: none; }
   
-        #messages-container { list-style-type: none; margin: 0; padding: 0; }
+        #messages-container { list-style-type: none; padding: 0; position: static; display: block; width: 80vw; margin-top: 8.3vh; margin-left: 20vw; margin-bottom: 15vh; }
         #messages-container > li { padding: 0.5rem 1rem; }
         #messages-container > li:nth-child(odd) { background: #efefef; }
 
-        #contacts { width: 20vw; }
-        #contacts > p { text-align: center; }
+        #actions { height: 8.3vh; display: block; margin-top: 0; position: fixed; top: 0; left: 20vw; right: 0; padding: 0; background: rgb(34, 30, 70); }
+        #actions > p { text-align: center; color: rgb(0, 0, 0); }
+
+        #contacts { width: 20vw; height: 100vh; position: fixed; background: rgb(0, 0, 0); top: 0; left: 0; padding: 0; }
+        #contacts > p { text-align: center; color: lightslategray; }
 
         #contact-list { list-style: none; margin: 0; padding: 0; }
-        #contact-list > li { display: block; margin: 5px 0; }
-        #contact-list > li > button { width: 100%; padding: 10px; background: rgb(67, 185, 231); border: none; outline: none; color: #fff; }
-        #contact-list > li > button:hover { background:rgb(51, 141, 177); }
-        #contact-list > li > button:focus { background: rgb(67, 231, 94); }
+        #contact-list > li { display: block; margin: 0; }
+        #contact-list > li > button { width: 100%; padding: 20px; background: rgb(0, 0, 0); border: none; outline: none; color: lightslategray; }
 
-        #new-contact-input { width: 80%; border-radius: 3px; background: rgb(67, 231, 94); border: none; padding: 5px; color: #000; }
+        #new-contact-input { position: fixed; bottom: 8%; left: 0; width: 20vw; background: rgb(31, 31, 31); padding: 13px 10px; color: rgb(0, 0, 0); border: none; }
+        #new-contact-input::placeholder { color: rgb(0, 0, 0); }
         #new-contact-input:focus { outline: none; }
+
+        #new-contact-button { position: fixed; bottom: 0; left: 0; width: 20vw; padding: 16px 0; background:rgb(34, 30, 70); border: none; }
+        #new-contact-button::placeholder { color: rgb(19, 19, 19) }
+        #new-contact-button:focus { outline: none; }
     </style>
     
     <div id="contacts">
@@ -41,31 +47,48 @@
         <input type="text" placeholder="Añade un usuario" id="new-contact-input"><button id="new-contact-button">Añadir</button>
     </div>
 
+    <div id="actions"><p></p></div>
+
     <ul id="messages-container"></ul>
-    <div id="chat">
-        <input id="chat-input" autocomplete="off"><button id="send-btn">Enviar</button>
-    </div>
+
+    <input id="chat-input" autocomplete="off" placeholder="Mensaje"><button id="send-btn">Enviar</button>
+    
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
+        const socket = io({autoConnect: false});
         
-        let input = document.getElementById('chat-input');
-        let btn = document.getElementById('send-btn');
-        let messagesContainer = document.getElementById('messages-container');
+        const input = document.getElementById('chat-input');
+        const btn = document.getElementById('send-btn');
+        const messagesContainer = document.getElementById('messages-container');
+        const actions = document.getElementById('actions');
 
-        let newContactInput = document.getElementById('new-contact-input');
-        let newContactBtn = document.getElementById('new-contact-button');
-        let contactList = document.getElementById('contact-list');
+        const newContactInput = document.getElementById('new-contact-input');
+        const newContactBtn = document.getElementById('new-contact-button');
+        const contactList = document.getElementById('contact-list');
 
+        const messages = new Map();
         let selectedUser = '';
         let selfID;
         let currentChat = '';
-        const messages = new Map();
+        let user;
 
-        const user = prompt('Elige un nombre de usuario');
-        socket.emit('username-selected', { username: user });
-        socket.emit('get-self-id', { user: user });
+        const sessionID = JSON.parse(localStorage.getItem('sessionID'));
+        console.log(sessionID, Boolean(sessionID));
+        if (sessionID) {
+            socket.auth = { sessionID }
+            socket.connect();
+        }
+        else {
+            (function selectUser() {
+                user = prompt('Elige un nombre de usuario');
+                if (!Boolean(user)) selectUser();
+            })();
+            socket.auth = { username: user }
+            socket.connect();
+            socket.emit('username-selected', { username: user });
+        }
+        //socket.emit('get-self-id', { user: user });
 
         function displayMessage(data) {
             let li = document.createElement('li');
@@ -97,6 +120,12 @@
         newContactBtn.addEventListener('click', e => {
             e.preventDefault();
             if (newContactInput.value) {
+                for (let li of contactList.getElementsByTagName('li')) {
+                    if (newContactInput.value === li.getElementsByTagName('button')[0].getAttribute('data-user')) {
+                        return socket.emit('error', 002)
+                    }
+                }
+
                 const li = document.createElement('li');
                 const newButton = document.createElement('button');
 
@@ -109,10 +138,26 @@
                 const button = li.getElementsByTagName('button')[0];
                 const contactName = button.getAttribute('data-user');
 
-                li.addEventListener('click', () => socket.emit('select-user', { selectedUser: contactName }));
+                li.addEventListener('click', () => {
+                    for (let li of contactList.getElementsByTagName('li')) {
+                        const button = li.getElementsByTagName('button')[0];
+                        button.style = `background: rgb(0, 0, 0)`;
+                    }
+                    button.style = `background: rgb(34, 30, 70)`;
+                    socket.emit('select-user', { selectedUser: contactName });
+                });
+
                 li.addEventListener('typing', () => button.innerHTML += ' está escribiendo...');
                 li.addEventListener('typing-stop', () => button.innerHTML = contactName);
             }
+        });
+
+        actions.addEventListener('typing', () => {
+            let p = actions.getElementsByTagName('p')[0];
+            p.innerHTML += ' está escribiendo...';
+            actions.addEventListener('typing-stop', () => { 
+                p.innerHTML = selectedUser.username;
+            });
         });
 
         btn.addEventListener('click', e => {
@@ -121,16 +166,15 @@
                 socket.emit('chat-message', { msg: input.value, from: user });
                 socket.emit('typing-stop', { user: user });
                 input.value = '';
-                window.scrollTo(0, document.body.scrollHeight);
+                window.scrollTo(0, document.body.scrollHeight + 1000);
             }
         });
 
         input.addEventListener('keypress', e => {
             if (e.keyCode === 13 && input.value) {
                 socket.emit('chat-message', { msg: input.value, from: user });
-                socket.emit('typing-stop', { user: user });
                 input.value = '';
-                window.scrollTo(0, document.body.scrollHeight);
+                window.scrollTo(0, document.body.scrollHeight + 1000);
             }
         });
 
@@ -142,30 +186,55 @@
             socket.emit('typing-stop', { user: user });
         });
 
-        socket.on('get-self-id', data => selfID = data.ID);
+        socket.on('select-username', () => {
+            (function selectUser() {
+                user = prompt('Elige un nombre de usuario');
+                if (!Boolean(user)) selectUser();
+            })();
+            socket.emit('username-selected', { username: user });
+        });
+
+        socket.on('session', data => {
+            socket.auth = { sessionID: data.sessionID }
+
+            localStorage.setItem('sessionID', JSON.stringify(data.sessionID));
+
+            selfID = data.userID;
+        });
+
+        socket.on('get-self-username', data => user = data.username);
 
         socket.on('chat-message', data => {
-            currentChat = getChatID(data.fromID, data.to);
+            if (data.from.ID === selfID || data.to.ID === selfID) {
+                currentChat = getChatID(data.from.ID, data.to.ID);
 
-            if (!messages.has(currentChat)) {
-                messages.set(currentChat, [{ from: data.from, msg: data.msg }]);
-            }
-            else {
-                messages.set(currentChat, messages.get(currentChat).concat([{ from: data.from, msg: data.msg }]));
-            }
+                if (!messages.has(currentChat)) {
+                    messages.set(currentChat, [{ from: data.from.username, msg: data.msg }]);
+                }
+                else {
+                    messages.get(currentChat).push({ from: data.from.username, msg: data.msg });
+                }
 
-            if (data.fromID === selfID || (data.fromID === selectedUser && data.to === selfID)) displayMessage(`${data.from}: ${data.msg}`);
+                if (data.from.ID === selfID) displayMessage(`${data.from.username} (Tu): ${data.msg}`);
+                else if (data.from.ID === selectedUser.ID && data.to.ID === selfID) displayMessage(`${data.from.username}: ${data.msg}`);
+            }
         });
 
         socket.on('load-messages', data => {
-            currentChat = getChatID(data.fromID, data.to);
+            currentChat = getChatID(data.from.ID, data.to.ID);
             selectedUser = data.to;
             messagesContainer.innerHTML = '';
+
             if (messages.has(currentChat)) {
                 for (let msg of messages.get(currentChat)) {
                     displayMessage(`${msg.from}: ${msg.msg}`);
                 }
             }
+
+            let p = actions.getElementsByTagName('p')[0];
+            p.innerHTML = selectedUser.username;
+
+            window.scrollTo(0, document.body.scrollHeight);
         });
 
         socket.on('error', errorID => {
@@ -174,6 +243,17 @@
                     alert('Error: User does not exist');
                     break;
             
+                case 002:
+                    alert('Error: User already in contact list');
+                    break;
+
+                case 003:
+                    alert('Error: Username is taken or blank');
+                    user = prompt('Elige un nombre de usuario');
+                    socket.emit('username-selected', { username: user });
+                    socket.emit('get-self-id', { user: user });
+                    break;
+
                 default:
                     alert('Unknown error');
                     break;
@@ -183,11 +263,13 @@
         socket.on('typing-start', data => {
             if (data.to === selfID) {
                 const typingEvent = new Event('typing');
+                if (data.from === selectedUser.username) actions.dispatchEvent(typingEvent);
+
                 const contacts = contactList.getElementsByTagName('li');
                 for (let li of contacts) {
                     const button = li.getElementsByTagName('button')[0];
                     const contactName = button.getAttribute('data-user');
-                    if (contactName === data.user) li.dispatchEvent(typingEvent);
+                    if (contactName === data.from) li.dispatchEvent(typingEvent);
                 }
             }
         });
@@ -195,11 +277,13 @@
         socket.on('typing-stop', data => {
             if (data.to === selfID) {
                 const typingEvent = new Event('typing-stop');
+                if (data.from === selectedUser.username) actions.dispatchEvent(typingEvent);
+
                 const contacts = contactList.getElementsByTagName('li');
                 for (let li of contacts) {
                     const button = li.getElementsByTagName('button')[0];
                     const contactName = button.getAttribute('data-user');
-                    if (contactName === data.user) li.dispatchEvent(typingEvent);
+                    if (contactName === data.from) li.dispatchEvent(typingEvent);
                 }
             }
         });
