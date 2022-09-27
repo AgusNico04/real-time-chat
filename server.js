@@ -10,8 +10,32 @@ const crypto = require('node:crypto');
 const randomId = () => crypto.randomBytes(8).toString("hex");
 
 const connectedUsers = new Map();
+const messages = new Map();
+const contacts = new Map();
 const SessionStore = require('./server/sessionStore');
 const sessionStore = new SessionStore();
+
+function getChatID(fromID, to) {
+    if (fromID === to) return fromID;
+    else if (fromID.length !== to.length) {
+        return fromID.length > to.length ? `${fromID}-${to}` : `${to}-${fromID}`;
+    }
+    else if (fromID.charCodeAt(0) > to.charCodeAt(0)) {
+        return `${fromID}-${to}`;
+    }
+    else if (fromID.charCodeAt(0) < to.charCodeAt(0)) {
+        return `${to}-${fromID}`;
+    }
+    
+    for (let i = 1; i < fromID.length; i++) {
+        if (fromID.charCodeAt(i) > to.charCodeAt(i)) {
+            return `${fromID}-${to}`
+        }
+        else if (fromID.charCodeAt(i) < to.charCodeAt(i)) {
+            return `${to}-${fromID}`;
+        }
+    }
+}
 
 app.use(express.urlencoded({ extended:false }));
 app.use(express.json());
@@ -48,15 +72,23 @@ io.on('connection', socket => {
     socket.join(socket.userID);
 
     socket.on('username-selected', data => {
-        socket.username = data.username;
+        if (!socket.username) socket.username = data.username;
         connectedUsers.set(socket.username, socket.userID);
     });
 
-    socket.emit('session', { sessionID: socket.sessionID, userID: socket.userID });
+    let messagesObject = Object.fromEntries(messages);
+    socket.emit('session', { sessionID: socket.sessionID, userID: socket.userID, messages: messagesObject });
+
+    let contactsObject = Object.fromEntries(contacts);
+    socket.emit('load-contacts', { contacts: contactsObject });
+
+    socket.on('add-contact', data => {
+        if (!contacts.has(socket.userID)) contacts.set(socket.userID, [data.contact]);
+        else contacts.get(socket.userID).push(data.contact);
+    });
 
     socket.on('select-user', data => {
         if (connectedUsers.get(data.selectedUser)) {
-            console.log(connectedUsers.get(data.selectedUser), data.selectedUser);
             socket.selectedUser = connectedUsers.get(data.selectedUser);
             socket.emit('load-messages', { from: { ID: socket.userID }, to: { ID: socket.selectedUser, username: data.selectedUser }});
             return;
@@ -66,6 +98,15 @@ io.on('connection', socket => {
 
     socket.on('chat-message', data => {
         if (socket.selectedUser) {
+            let currentChat = getChatID(socket.userID, socket.selectedUser);
+            console.log(currentChat, messages.get(currentChat));
+            if (!messages.has(currentChat)) {
+                messages.set(currentChat, [{ from: data.from, msg: data.msg }]);
+            }
+            else {
+                messages.get(currentChat).push({ from: data.from, msg: data.msg });
+            }
+
             io.emit('chat-message', { msg: data.msg, from: { username: data.from, ID: socket.userID }, to: { ID: socket.selectedUser }});
         }
     });
@@ -78,6 +119,7 @@ io.on('connection', socket => {
     });
 
     socket.on('disconnect', async () => {
+        io.emit('typing-stop', { from: socket.username, to: socket.selectedUser });
         const matchingSockets = await io.in(socket.userID).allSockets();
         const isDisconnected = matchingSockets.size === 0;
         if (isDisconnected) {
@@ -85,7 +127,6 @@ io.on('connection', socket => {
                 userID: socket.userID,
                 username: socket.username
             });
-            console.log('Session saved: ', sessionStore);
         }
     });
 });

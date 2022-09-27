@@ -68,6 +68,7 @@
         const contactList = document.getElementById('contact-list');
 
         const messages = new Map();
+        const contacts = new Map();
         let selectedUser = '';
         let selfID;
         let currentChat = '';
@@ -88,7 +89,6 @@
             socket.connect();
             socket.emit('username-selected', { username: user });
         }
-        //socket.emit('get-self-id', { user: user });
 
         function displayMessage(data) {
             let li = document.createElement('li');
@@ -97,7 +97,8 @@
         }
 
         function getChatID(fromID, to) {
-            if (fromID.length !== to.length) {
+            if (fromID === to) return fromID;
+            else if (fromID.length !== to.length) {
                 return fromID.length > to.length ? `${fromID}-${to}` : `${to}-${fromID}`;
             }
             else if (fromID.charCodeAt(0) > to.charCodeAt(0)) {
@@ -120,12 +121,10 @@
         newContactBtn.addEventListener('click', e => {
             e.preventDefault();
             if (newContactInput.value) {
-                for (let li of contactList.getElementsByTagName('li')) {
-                    if (newContactInput.value === li.getElementsByTagName('button')[0].getAttribute('data-user')) {
-                        return socket.emit('error', 002)
-                    }
+                if (contacts.get(selfID).includes(newContactInput.value)) {
+                    return socket.emit('error', 002)
                 }
-
+                
                 const li = document.createElement('li');
                 const newButton = document.createElement('button');
 
@@ -134,9 +133,12 @@
 
                 li.appendChild(newButton);
                 contactList.appendChild(li);
+                contacts.get(selfID).push(newContactInput.value);
 
                 const button = li.getElementsByTagName('button')[0];
                 const contactName = button.getAttribute('data-user');
+
+                socket.emit('add-contact', { contact: contactName });
 
                 li.addEventListener('click', () => {
                     for (let li of contactList.getElementsByTagName('li')) {
@@ -197,9 +199,13 @@
         socket.on('session', data => {
             socket.auth = { sessionID: data.sessionID }
 
-            localStorage.setItem('sessionID', JSON.stringify(data.sessionID));
-
             selfID = data.userID;
+            contacts.set(selfID, []);
+            for(const [key, value] of Object.entries(data.messages)) {
+                messages.set(key, value);
+            }
+
+            localStorage.setItem('sessionID', JSON.stringify(data.sessionID));
         });
 
         socket.on('get-self-username', data => user = data.username);
@@ -215,7 +221,7 @@
                     messages.get(currentChat).push({ from: data.from.username, msg: data.msg });
                 }
 
-                if (data.from.ID === selfID) displayMessage(`${data.from.username} (Tu): ${data.msg}`);
+                if (data.from.ID === selfID && selectedUser) displayMessage(`${data.from.username} (Tu): ${data.msg}`);
                 else if (data.from.ID === selectedUser.ID && data.to.ID === selfID) displayMessage(`${data.from.username}: ${data.msg}`);
             }
         });
@@ -226,8 +232,9 @@
             messagesContainer.innerHTML = '';
 
             if (messages.has(currentChat)) {
-                for (let msg of messages.get(currentChat)) {
-                    displayMessage(`${msg.from}: ${msg.msg}`);
+                for (const msg of messages.get(currentChat)) {
+                    if (msg.from === user) displayMessage(`${msg.from} (Tu): ${msg.msg}`);
+                    else displayMessage(`${msg.from}: ${msg.msg}`);
                 }
             }
 
@@ -235,6 +242,40 @@
             p.innerHTML = selectedUser.username;
 
             window.scrollTo(0, document.body.scrollHeight);
+        });
+
+        socket.on('load-contacts', data => {
+            for (const [key, value] of Object.entries(data.contacts)) {
+                if (key === selfID) {
+                    value.forEach(contact => {
+                        if (!contacts.get(selfID).includes(contact)) {
+                            const li = document.createElement('li');
+                            const newButton = document.createElement('button');
+
+                            newButton.innerHTML = contact;
+                            newButton.setAttribute('data-user', contact);
+
+                            li.appendChild(newButton);
+                            contactList.appendChild(li);
+
+                            const button = li.getElementsByTagName('button')[0];
+                            const contactName = button.getAttribute('data-user');
+
+                            li.addEventListener('click', () => {
+                                for (let li of contactList.getElementsByTagName('li')) {
+                                    const button = li.getElementsByTagName('button')[0];
+                                    button.style = `background: rgb(0, 0, 0)`;
+                                }
+                                button.style = `background: rgb(34, 30, 70)`;
+                                socket.emit('select-user', { selectedUser: contactName });
+                            });
+
+                            li.addEventListener('typing', () => button.innerHTML += ' está escribiendo...');
+                            li.addEventListener('typing-stop', () => button.innerHTML = contactName);
+                        }
+                    });
+                }
+            }
         });
 
         socket.on('error', errorID => {
