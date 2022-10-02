@@ -37,6 +37,15 @@ function getChatID(fromID, to) {
     }
 }
 
+function saveMessages(messagesStore, currentChat, data) {
+    if (!messagesStore.has(currentChat)) {
+        messagesStore.set(currentChat, [{ from: data.from, msg: data.msg }]);
+    }
+    else {
+        messagesStore.get(currentChat).push({ from: data.from, msg: data.msg });
+    }
+}
+
 app.use(express.urlencoded({ extended:false }));
 app.use(express.json());
 
@@ -60,10 +69,13 @@ io.use((socket, next) => {
     }
 
     const username = socket.handshake.auth.username;
-    if (!username) socket.emit('select-username');
+    if (!username || connectedUsers.has(username)) {
+        return next(new Error());
+    }
 
     socket.sessionID = randomId();
     socket.userID = randomId();
+    socket.username = username;
     
     next();
 });
@@ -71,55 +83,62 @@ io.use((socket, next) => {
 io.on('connection', socket => {
     socket.join(socket.userID);
 
-    socket.on('username-selected', data => {
-        if (!socket.username) socket.username = data.username;
-        connectedUsers.set(socket.username, socket.userID);
-    });
+    connectedUsers.set(socket.username, socket.userID);
 
-    let messagesObject = Object.fromEntries(messages);
+    const messagesObject = Object.fromEntries(messages);
     socket.emit('session', { sessionID: socket.sessionID, userID: socket.userID, messages: messagesObject });
 
-    let contactsObject = Object.fromEntries(contacts);
+    const contactsObject = Object.fromEntries(contacts);
     socket.emit('load-contacts', { contacts: contactsObject });
 
     socket.on('add-contact', data => {
-        if (!contacts.has(socket.userID)) contacts.set(socket.userID, [data.contact]);
-        else contacts.get(socket.userID).push(data.contact);
+        if (!contacts.has(socket.userID)) contacts.set(socket.userID, [{ name: data.name, type: data.type }]);
+        else contacts.get(socket.userID).push({ name: data.name, type: data.type });
     });
 
     socket.on('select-user', data => {
-        if (connectedUsers.get(data.selectedUser)) {
-            socket.selectedUser = connectedUsers.get(data.selectedUser);
-            socket.emit('load-messages', { from: { ID: socket.userID }, to: { ID: socket.selectedUser, username: data.selectedUser }});
-            return;
+        if (data.type === 'private') {
+            if (connectedUsers.get(data.selectedChat)) {
+                socket.selectedChat = connectedUsers.get(data.selectedChat);
+                socket.emit('load-messages', { from: { ID: socket.userID }, to: { ID: socket.selectedChat, username: data.selectedChat }, chat: { type: 'private' }});
+                return;
+            }
+            socket.emit('error', 001);
         }
-        socket.emit('error', 001);
+        else if (data.type === 'group') {
+            socket.selectedChat = data.selectedChat;
+            socket.emit('load-messages', { from: { ID: socket.userID }, to: { groupName: socket.selectedChat }, chat: { type: 'group' }});
+        }
     });
 
     socket.on('chat-message', data => {
-        if (socket.selectedUser) {
-            let currentChat = getChatID(socket.userID, socket.selectedUser);
-            console.log(currentChat, messages.get(currentChat));
-            if (!messages.has(currentChat)) {
-                messages.set(currentChat, [{ from: data.from, msg: data.msg }]);
+        if (socket.selectedChat) {
+            if (data.type === 'private') {
+                const currentChat = getChatID(socket.userID, socket.selectedChat);
+                saveMessages(messages, currentChat, { from: data.from, msg: data.msg });
+                io.emit('private-message', { msg: data.msg, from: { username: data.from, ID: socket.userID }, to: { ID: socket.selectedChat }});
             }
-            else {
-                messages.get(currentChat).push({ from: data.from, msg: data.msg });
+            else if (data.type === 'group') {
+                const currentChat = socket.selectedChat;
+                saveMessages(messages, currentChat, { from: data.from, msg: data.msg });
+                io.emit('group-message', { msg: data.msg, from: { username: data.from, ID: socket.userID }, to: { groupName: currentChat }});
             }
-
-            io.emit('chat-message', { msg: data.msg, from: { username: data.from, ID: socket.userID }, to: { ID: socket.selectedUser }});
         }
     });
 
-    socket.on('typing-start', data => io.emit('typing-start', { from: data.user, to: socket.selectedUser }));
-    socket.on('typing-stop', data => io.emit('typing-stop', { from: data.user, to: socket.selectedUser }));
+    socket.on('group-message', () => {
+
+    });
+
+    socket.on('typing-start', data => io.emit('typing-start', { from: data.user, to: socket.selectedChat }));
+    socket.on('typing-stop', data => io.emit('typing-stop', { from: data.user, to: socket.selectedChat }));
 
     socket.on('error', errorID => {
         socket.emit('error', errorID);
     });
 
     socket.on('disconnect', async () => {
-        io.emit('typing-stop', { from: socket.username, to: socket.selectedUser });
+        io.emit('typing-stop', { from: socket.username, to: socket.selectedChat });
         const matchingSockets = await io.in(socket.userID).allSockets();
         const isDisconnected = matchingSockets.size === 0;
         if (isDisconnected) {
@@ -131,4 +150,4 @@ io.on('connection', socket => {
     });
 });
 
-server.listen(3000);
+server.listen(4000);

@@ -29,13 +29,19 @@
         #contact-list > li { display: block; margin: 0; }
         #contact-list > li > button { width: 100%; padding: 20px; background: rgb(0, 0, 0); border: none; outline: none; color: lightslategray; }
 
-        #new-contact-input { position: fixed; bottom: 8%; left: 0; width: 20vw; background: rgb(31, 31, 31); padding: 13px 10px; color: rgb(0, 0, 0); border: none; }
+        #new-contact-input { position: fixed; bottom: 16%; left: 0; width: 20vw; background: rgb(31, 31, 31); padding: 13px 10px; color: rgb(0, 0, 0); border: none; }
         #new-contact-input::placeholder { color: rgb(0, 0, 0); }
         #new-contact-input:focus { outline: none; }
 
-        #new-contact-button { position: fixed; bottom: 0; left: 0; width: 20vw; padding: 16px 0; background:rgb(34, 30, 70); border: none; }
+        #new-contact-button { position: fixed; bottom: 8%; left: 0; width: 20vw; padding: 16px 0; background:rgb(34, 30, 70); border: none; }
         #new-contact-button::placeholder { color: rgb(19, 19, 19) }
         #new-contact-button:focus { outline: none; }
+        #new-contact-button:hover { background: rgb(21, 19, 44); }
+
+        #new-group-button { position: fixed; bottom: 0; left: 0; width: 20vw; padding: 16px 0; background:rgb(34, 30, 70); border: none }
+        #new-group-button::placeholder { color: rgb(19, 19, 19) }
+        #new-group-button:focus { outline: none; }
+        #new-group-button:hover { background: rgb(21, 19, 44); }
     </style>
     
     <div id="contacts">
@@ -43,8 +49,8 @@
         <ul id="contact-list">
 
         </ul>
-
-        <input type="text" placeholder="Añade un usuario" id="new-contact-input"><button id="new-contact-button">Añadir</button>
+        
+        <input type="text" placeholder="Añade un usuario" id="new-contact-input"><button id="new-contact-button">Añadir Contacto</button><button id="new-group-button">Añadir Grupo</button>
     </div>
 
     <div id="actions"><p></p></div>
@@ -65,35 +71,45 @@
 
         const newContactInput = document.getElementById('new-contact-input');
         const newContactBtn = document.getElementById('new-contact-button');
+        const newGroupBtn = document.getElementById('new-group-button');
         const contactList = document.getElementById('contact-list');
 
         const messages = new Map();
         const contacts = new Map();
-        let selectedUser = '';
+        let selectedChat = '';
         let selfID;
         let currentChat = '';
         let user;
 
+        function selectUser() {
+            user = prompt('Elige un nombre de usuario');
+            if (!Boolean(user)) selectUser();
+        }
+
         const sessionID = JSON.parse(localStorage.getItem('sessionID'));
-        console.log(sessionID, Boolean(sessionID));
         if (sessionID) {
             socket.auth = { sessionID }
             socket.connect();
         }
         else {
-            (function selectUser() {
-                user = prompt('Elige un nombre de usuario');
-                if (!Boolean(user)) selectUser();
-            })();
+            selectUser();
             socket.auth = { username: user }
             socket.connect();
-            socket.emit('username-selected', { username: user });
         }
 
         function displayMessage(data) {
             let li = document.createElement('li');
             li.innerHTML = data;
             messagesContainer.appendChild(li);
+        }
+
+        function saveMessages(messagesStore, currentChat, data) {
+            if (!messagesStore.has(currentChat)) {
+                messagesStore.set(currentChat, [{ from: data.from, msg: data.msg }]);
+            }
+            else {
+                messagesStore.get(currentChat).push({ from: data.from, msg: data.msg });
+            }
         }
 
         function getChatID(fromID, to) {
@@ -120,37 +136,100 @@
 
         newContactBtn.addEventListener('click', e => {
             e.preventDefault();
-            if (newContactInput.value) {
-                if (contacts.get(selfID).includes(newContactInput.value)) {
-                    return socket.emit('error', 002)
+            const newContact = newContactInput.value;
+            if (newContact) {
+                if (contacts.has(selfID)) {
+                    if (contacts.get(selfID).includes(newContact)) return socket.emit('error', 002);
                 }
+                else contacts.set(selfID, []);
                 
                 const li = document.createElement('li');
                 const newButton = document.createElement('button');
 
-                newButton.innerHTML = newContactInput.value;
-                newButton.setAttribute('data-user', newContactInput.value);
+                newButton.innerHTML = newContact === user ? `${newContact} (Tu)`: newContact;
+                newButton.setAttribute('data-user', newContact);
 
                 li.appendChild(newButton);
                 contactList.appendChild(li);
-                contacts.get(selfID).push(newContactInput.value);
+                contacts.get(selfID).push({ name: newContact, type: 'private' });
 
                 const button = li.getElementsByTagName('button')[0];
-                const contactName = button.getAttribute('data-user');
+                const name = button.getAttribute('data-user');
 
-                socket.emit('add-contact', { contact: contactName });
+                socket.emit('add-contact', { name: name, type: 'private' });
 
+                const bg = button.style;
                 li.addEventListener('click', () => {
                     for (let li of contactList.getElementsByTagName('li')) {
                         const button = li.getElementsByTagName('button')[0];
                         button.style = `background: rgb(0, 0, 0)`;
                     }
-                    button.style = `background: rgb(34, 30, 70)`;
-                    socket.emit('select-user', { selectedUser: contactName });
+                    bg.background = 'rgb(34, 30, 70)';
+                    socket.emit('select-user', { selectedChat: name, type: 'private' });
+                });
+
+                li.addEventListener('mouseover', () => {
+                    if (bg.background !== 'rgb(34, 30, 70)') bg.background = 'rgb(31, 31, 31)';
+                });
+
+                li.addEventListener('mouseout', () => {
+                    if (bg.background !== 'rgb(34, 30, 70)') bg.background = 'rgb(0, 0, 0)';
                 });
 
                 li.addEventListener('typing', () => button.innerHTML += ' está escribiendo...');
-                li.addEventListener('typing-stop', () => button.innerHTML = contactName);
+                li.addEventListener('typing-stop', () => button.innerHTML = name === user ? `${name} (Tu)` : name);
+            }
+        });
+
+        newGroupBtn.addEventListener('click', e => {
+            e.preventDefault();
+            const newGroup = newContactInput.value;
+            if (newGroup) {
+                if (contacts.has(selfID)) {
+                    if (contacts.get(selfID).includes(newGroup)) return socket.emit('error', 002);
+                }
+                else contacts.set(selfID, []);
+
+                const li = document.createElement('li');
+                const newButton = document.createElement('button');
+
+                newButton.innerHTML = `${newGroup} (Grupo)`;
+                newButton.setAttribute('data-user', newGroup);
+
+                li.appendChild(newButton);
+                contactList.appendChild(li);
+                contacts.get(selfID).push({ name: newGroup, type: 'group' });
+
+                const button = li.getElementsByTagName('button')[0];
+                const name = button.getAttribute('data-user');
+
+                socket.emit('add-contact', { name: name, type: 'group' });
+
+                const bg = button.style;
+                li.addEventListener('click', () => {
+                    for (let li of contactList.getElementsByTagName('li')) {
+                        const button = li.getElementsByTagName('button')[0];
+                        button.style = `background: rgb(0, 0, 0)`;
+                    }
+                    bg.background = 'rgb(34, 30, 70)';
+                    socket.emit('select-user', { selectedChat: name, type: 'group' });
+                });
+
+                li.addEventListener('mouseover', () => {
+                    if (bg.background !== 'rgb(34, 30, 70)') bg.background = 'rgb(31, 31, 31)';
+                });
+
+                li.addEventListener('mouseout', () => {
+                    if (bg.background !== 'rgb(34, 30, 70)') bg.background = 'rgb(0, 0, 0)';
+                });
+
+                li.addEventListener('typing', () => {            
+                    button.innerHTML += ` está escribiendo...`;
+                });
+                        
+                li.addEventListener('typing-stop', () => { 
+                    button.innerHTML = `${name} (Grupo)`;
+                });
             }
         });
 
@@ -158,14 +237,14 @@
             let p = actions.getElementsByTagName('p')[0];
             p.innerHTML += ' está escribiendo...';
             actions.addEventListener('typing-stop', () => { 
-                p.innerHTML = selectedUser.username;
+                p.innerHTML = selectedChat.username === user ? `${selectedChat.username} (Tu)`: selectedChat.username;
             });
         });
 
         btn.addEventListener('click', e => {
             e.preventDefault();
             if (input.value) {
-                socket.emit('chat-message', { msg: input.value, from: user });
+                socket.emit('chat-message', { msg: input.value, from: user, type: selectedChat.chat.type });
                 socket.emit('typing-stop', { user: user });
                 input.value = '';
                 window.scrollTo(0, document.body.scrollHeight + 1000);
@@ -174,7 +253,7 @@
 
         input.addEventListener('keypress', e => {
             if (e.keyCode === 13 && input.value) {
-                socket.emit('chat-message', { msg: input.value, from: user });
+                socket.emit('chat-message', { msg: input.value, from: user, type: selectedChat.chat.type });
                 input.value = '';
                 window.scrollTo(0, document.body.scrollHeight + 1000);
             }
@@ -188,20 +267,11 @@
             socket.emit('typing-stop', { user: user });
         });
 
-        socket.on('select-username', () => {
-            (function selectUser() {
-                user = prompt('Elige un nombre de usuario');
-                if (!Boolean(user)) selectUser();
-            })();
-            socket.emit('username-selected', { username: user });
-        });
-
         socket.on('session', data => {
-            socket.auth = { sessionID: data.sessionID }
-
+			socket.auth = { sessionID: data.sessionID }
+						
             selfID = data.userID;
-            contacts.set(selfID, []);
-            for(const [key, value] of Object.entries(data.messages)) {
+            for (const [key, value] of Object.entries(data.messages)) {
                 messages.set(key, value);
             }
 
@@ -210,70 +280,132 @@
 
         socket.on('get-self-username', data => user = data.username);
 
-        socket.on('chat-message', data => {
+        socket.on('private-message', data => {
             if (data.from.ID === selfID || data.to.ID === selfID) {
                 currentChat = getChatID(data.from.ID, data.to.ID);
+                saveMessages(messages, currentChat, { from: data.from.username, msg: data.msg });
 
-                if (!messages.has(currentChat)) {
-                    messages.set(currentChat, [{ from: data.from.username, msg: data.msg }]);
-                }
-                else {
-                    messages.get(currentChat).push({ from: data.from.username, msg: data.msg });
-                }
+                if (data.from.ID === selfID && selectedChat) displayMessage(`${data.from.username} (Tu): ${data.msg}`);
+                else if (data.from.ID === selectedChat.to.ID && data.to.ID === selfID) displayMessage(`${data.from.username}: ${data.msg}`);
+            }
+        });
 
-                if (data.from.ID === selfID && selectedUser) displayMessage(`${data.from.username} (Tu): ${data.msg}`);
-                else if (data.from.ID === selectedUser.ID && data.to.ID === selfID) displayMessage(`${data.from.username}: ${data.msg}`);
+        socket.on('group-message', data => {
+            if (data.from.ID === selfID || data.to.groupName === selectedChat.to.groupName) {
+                currentChat = data.to.groupName;
+                saveMessages(messages, currentChat, { from: data.from.username, msg: data.msg });
+
+                if (data.from.ID === selfID && selectedChat) displayMessage(`${data.from.username} (Tu): ${data.msg}`);
+                else displayMessage(`${data.from.username}: ${data.msg}`);
             }
         });
 
         socket.on('load-messages', data => {
-            currentChat = getChatID(data.from.ID, data.to.ID);
-            selectedUser = data.to;
-            messagesContainer.innerHTML = '';
+            if (data.chat.type === 'private') {
+                currentChat = getChatID(data.from.ID, data.to.ID);
+                selectedChat = { to: { ID: data.to.ID, username: data.to.username }, chat: { type: data.chat.type }}
+                messagesContainer.innerHTML = '';
 
-            if (messages.has(currentChat)) {
-                for (const msg of messages.get(currentChat)) {
-                    if (msg.from === user) displayMessage(`${msg.from} (Tu): ${msg.msg}`);
-                    else displayMessage(`${msg.from}: ${msg.msg}`);
+                if (messages.has(currentChat)) {
+                    for (const msg of messages.get(currentChat)) {
+                        if (msg.from === user) displayMessage(`${msg.from} (Tu): ${msg.msg}`);
+                        else displayMessage(`${msg.from}: ${msg.msg}`);
+                    }
                 }
+
+                const p = actions.getElementsByTagName('p')[0];
+                p.innerHTML = selectedChat.to.username === user ? `${selectedChat.to.username} (Tu)`: selectedChat.to.username;
+
+                window.scrollTo(0, document.body.scrollHeight);
             }
+            else if (data.chat.type === 'group') {
+                currentChat = data.to.groupName;
+                selectedChat = { to: { groupName: currentChat }, chat: { type: data.chat.type }}
+                messagesContainer.innerHTML = '';
 
-            let p = actions.getElementsByTagName('p')[0];
-            p.innerHTML = selectedUser.username;
+                if (messages.has(currentChat)) {
+                    for (const msg of messages.get(currentChat)) {
+                        if (msg.from === user) displayMessage(`${msg.from} (Tu): ${msg.msg}`);
+                        else displayMessage(`${msg.from}: ${msg.msg}`);
+                    }
+                }
 
-            window.scrollTo(0, document.body.scrollHeight);
+                const p = actions.getElementsByTagName('p')[0];
+                p.innerHTML = selectedChat.to.groupName;
+
+                window.scrollTo(0, document.body.scrollHeight);
+            }
         });
 
         socket.on('load-contacts', data => {
-            for (const [key, value] of Object.entries(data.contacts)) {
+            for (const [key, values] of Object.entries(data.contacts)) {
                 if (key === selfID) {
-                    value.forEach(contact => {
-                        if (!contacts.get(selfID).includes(contact)) {
-                            const li = document.createElement('li');
-                            const newButton = document.createElement('button');
-
-                            newButton.innerHTML = contact;
-                            newButton.setAttribute('data-user', contact);
-
-                            li.appendChild(newButton);
-                            contactList.appendChild(li);
-
-                            const button = li.getElementsByTagName('button')[0];
-                            const contactName = button.getAttribute('data-user');
-
-                            li.addEventListener('click', () => {
-                                for (let li of contactList.getElementsByTagName('li')) {
-                                    const button = li.getElementsByTagName('button')[0];
-                                    button.style = `background: rgb(0, 0, 0)`;
-                                }
-                                button.style = `background: rgb(34, 30, 70)`;
-                                socket.emit('select-user', { selectedUser: contactName });
-                            });
-
-                            li.addEventListener('typing', () => button.innerHTML += ' está escribiendo...');
-                            li.addEventListener('typing-stop', () => button.innerHTML = contactName);
+                    for(const contactInfo of values) {
+                        if (contacts.has(selfID)) {
+                            if (contacts.get(selfID).includes(contactInfo)) continue;
                         }
-                    });
+                        else contacts.set(selfID, []);
+
+                        const li = document.createElement('li');
+                        const newButton = document.createElement('button');
+
+                        if (contactInfo.type === 'private') {
+                            newButton.innerHTML = contactInfo.name === user ? `${contactInfo.name} (Tu)`: contactInfo.name;
+                            newButton.setAttribute('data-user', contactInfo.name);
+                        }
+                        else if (contactInfo.type === 'group') {
+                            newButton.innerHTML = `${contactInfo.name} (Grupo)`;
+                            newButton.setAttribute('data-user', contactInfo.name);
+                        }
+
+                        li.appendChild(newButton);
+                        contactList.appendChild(li);
+                        contacts.get(selfID).push(contactInfo);
+
+                        const button = li.getElementsByTagName('button')[0];
+                        const name = button.getAttribute('data-user');
+
+                        const bg = button.style;
+                        li.addEventListener('click', () => {
+                            for (let li of contactList.getElementsByTagName('li')) {
+                                const button = li.getElementsByTagName('button')[0];
+                                button.style = `background: rgb(0, 0, 0)`;
+                            }
+                            bg.background = 'rgb(34, 30, 70)';
+                            if (contactInfo.type === 'private') {
+                                socket.emit('select-user', { selectedChat: name, type: 'private' });
+                            }
+                            else if (contactInfo.type === 'group') {
+                                socket.emit('select-user', { selectedChat: name, type: 'group' });
+                            }
+                        });
+                    
+                        li.addEventListener('mouseover', () => {
+                            if (bg.background !== 'rgb(34, 30, 70)') bg.background = 'rgb(31, 31, 31)';
+                        });
+                    
+                        li.addEventListener('mouseout', () => {
+                            if (bg.background !== 'rgb(34, 30, 70)') bg.background = 'rgb(0, 0, 0)';
+                        });
+
+                        li.addEventListener('typing', () => { 
+                            if (contactInfo.type === 'private') {
+                                button.innerHTML += ' está escribiendo...';
+                            }
+                            else if (contactInfo.type === 'group') {
+                                button.innerHTML += `${contactInfo.name} está escribiendo`;
+                            }
+                        });
+
+                        li.addEventListener('typing-stop', () => { 
+                            if (contactInfo.type === 'private') {
+                                button.innerHTML = contactInfo.name === user ? `${contactInfo.name} (Tu)` : contactInfo.name;
+                            }
+                            else if (contactInfo.type === 'group') {
+                                button.innerHTML = `${contactInfo.name} (Grupo)`;
+                            }
+                        });
+                    }
                 }
             }
         });
@@ -288,13 +420,6 @@
                     alert('Error: User already in contact list');
                     break;
 
-                case 003:
-                    alert('Error: Username is taken or blank');
-                    user = prompt('Elige un nombre de usuario');
-                    socket.emit('username-selected', { username: user });
-                    socket.emit('get-self-id', { user: user });
-                    break;
-
                 default:
                     alert('Unknown error');
                     break;
@@ -304,7 +429,7 @@
         socket.on('typing-start', data => {
             if (data.to === selfID) {
                 const typingEvent = new Event('typing');
-                if (data.from === selectedUser.username) actions.dispatchEvent(typingEvent);
+                if (data.from === selectedChat.to.username) actions.dispatchEvent(typingEvent);
 
                 const contacts = contactList.getElementsByTagName('li');
                 for (let li of contacts) {
@@ -318,7 +443,7 @@
         socket.on('typing-stop', data => {
             if (data.to === selfID) {
                 const typingEvent = new Event('typing-stop');
-                if (data.from === selectedUser.username) actions.dispatchEvent(typingEvent);
+                if (data.from === selectedChat.to.username) actions.dispatchEvent(typingEvent);
 
                 const contacts = contactList.getElementsByTagName('li');
                 for (let li of contacts) {
@@ -327,6 +452,13 @@
                     if (contactName === data.from) li.dispatchEvent(typingEvent);
                 }
             }
+        });
+
+        socket.on('connect_error', () => {
+            alert('Error: Username is taken or blank');
+            selectUser();
+            socket.auth = { username: user }
+            socket.connect();
         });
     </script>
 </body>
