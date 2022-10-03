@@ -38,22 +38,13 @@ function getChatID(fromID, to) {
 }
 
 function saveMessages(messagesStore, currentChat, data) {
-    if (!messagesStore.has(currentChat)) {
-        messagesStore.set(currentChat, [{ from: data.from, msg: data.msg }]);
-    }
-    else {
-        messagesStore.get(currentChat).push({ from: data.from, msg: data.msg });
-    }
+    if (!messagesStore.has(currentChat)) messagesStore.set(currentChat, [{ from: data.from, msg: data.msg }]);
+    else messagesStore.get(currentChat).push({ from: data.from, msg: data.msg });
 }
-
-app.use(express.urlencoded({ extended:false }));
-app.use(express.json());
 
 app.use(express.static(path.join(__dirname, '/app/public')));
 
-app.get('/', (req, res) => {
-    res.sendFile('/workspaces/real-time-chat/app/views/index.html');
-});
+app.get('/', (req, res) => res.sendFile('/workspaces/real-time-chat/app/views/index.html'));
 
 io.use((socket, next) => {
     const sessionID = socket.handshake.auth.sessionID;
@@ -69,7 +60,7 @@ io.use((socket, next) => {
     }
 
     const username = socket.handshake.auth.username;
-    if (!username || connectedUsers.has(username)) {
+    if (!Boolean(username) || connectedUsers.has(username)) {
         return next(new Error());
     }
 
@@ -105,7 +96,7 @@ io.on('connection', socket => {
             }
             socket.emit('error', 001);
         }
-        else if (data.type === 'group') {
+        else {
             socket.selectedChat = data.selectedChat;
             socket.emit('load-messages', { from: { ID: socket.userID }, to: { groupName: socket.selectedChat }, chat: { type: 'group' }});
         }
@@ -113,32 +104,20 @@ io.on('connection', socket => {
 
     socket.on('chat-message', data => {
         if (socket.selectedChat) {
-            if (data.type === 'private') {
-                const currentChat = getChatID(socket.userID, socket.selectedChat);
-                saveMessages(messages, currentChat, { from: data.from, msg: data.msg });
-                io.emit('private-message', { msg: data.msg, from: { username: data.from, ID: socket.userID }, to: { ID: socket.selectedChat }});
-            }
-            else if (data.type === 'group') {
-                const currentChat = socket.selectedChat;
-                saveMessages(messages, currentChat, { from: data.from, msg: data.msg });
-                io.emit('group-message', { msg: data.msg, from: { username: data.from, ID: socket.userID }, to: { groupName: currentChat }});
-            }
+            const currentChat = data.type === 'private' ? getChatID(socket.userID, socket.selectedChat) : socket.selectedChat;
+            saveMessages(messages, currentChat, { from: data.from, msg: data.msg });
+            if (data.type === 'private') io.emit('private-message', { msg: data.msg, from: { username: data.from, ID: socket.userID }, to: { ID: socket.selectedChat }});
+            else io.emit('group-message', { msg: data.msg, from: { username: data.from, ID: socket.userID }, to: { groupName: currentChat }});
         }
     });
 
-    socket.on('group-message', () => {
+    socket.on('typing-start', data => io.emit('typing-start', { from: { ID: data.userID, username: data.username }, to: socket.selectedChat, chat: { type: data.type } }));
+    socket.on('typing-stop', data => io.emit('typing-stop', { from: { ID: data.userID, username: data.username }, to: socket.selectedChat, chat: { type: data.type } }));
 
-    });
-
-    socket.on('typing-start', data => io.emit('typing-start', { from: data.user, to: socket.selectedChat }));
-    socket.on('typing-stop', data => io.emit('typing-stop', { from: data.user, to: socket.selectedChat }));
-
-    socket.on('error', errorID => {
-        socket.emit('error', errorID);
-    });
+    socket.on('error', errorID => socket.emit('error', errorID));
 
     socket.on('disconnect', async () => {
-        io.emit('typing-stop', { from: socket.username, to: socket.selectedChat });
+        io.emit('user-disconnection', { ID: socket.userID, username: socket.username });
         const matchingSockets = await io.in(socket.userID).allSockets();
         const isDisconnected = matchingSockets.size === 0;
         if (isDisconnected) {
@@ -150,4 +129,4 @@ io.on('connection', socket => {
     });
 });
 
-server.listen(4000);
+server.listen(3000);
