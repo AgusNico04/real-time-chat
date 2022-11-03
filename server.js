@@ -42,9 +42,9 @@ function saveMessages(messagesStore, currentChat, data) {
     else messagesStore.get(currentChat).push({ from: data.from, msg: data.msg });
 }
 
-app.use(express.static(path.join(__dirname, '/app/public')));
+app.use(express.static(path.join(__dirname, '/app')));
 
-app.get('/', (req, res) => res.sendFile('/workspaces/real-time-chat/app/views/index.html'));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'app/views/index.html')));
 
 io.use((socket, next) => {
     const sessionID = socket.handshake.auth.sessionID;
